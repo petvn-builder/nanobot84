@@ -25,6 +25,8 @@ RUN mkdir -p nanobot bridge && touch nanobot/__init__.py && \
 COPY nanobot/ nanobot/
 COPY bridge/ bridge/
 COPY webui/ webui/
+COPY config.template.json config.template.json
+COPY scripts/render_config.py scripts/render_config.py
 RUN uv pip install --system --no-cache .
 
 # Build the WhatsApp bridge

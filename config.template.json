@@ -1,0 +1,31 @@
+{
+  "providers": {
+    "openrouter": {
+      "apiKey": "${OPENROUTER_API_KEY}"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "provider": "openrouter",
+      "model": "${NANOBOT_MODEL}",
+      "workspace": "/home/nanobot/.nanobot/workspace",
+      "unifiedSession": true
+    }
+  },
+  "channels": {
+    "websocket": {
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8765,
+      "token": "${NANOBOT_WEB_TOKEN}",
+      "websocketRequiresToken": true,
+      "allowFrom": [
+        "*"
+      ]
+    }
+  },
+  "gateway": {
+    "host": "0.0.0.0",
+    "port": 18790
+  }
+}
