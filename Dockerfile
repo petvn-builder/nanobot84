@@ -39,7 +39,7 @@ WORKDIR /app
 # Create non-root user and config directory
 RUN useradd -m -u 1000 -s /bin/bash nanobot && \
     mkdir -p /home/nanobot/.nanobot && \
-    chown -R nanobot:nanobot /home/nanobot /app
+    chown -R nanobot:nanobot /home/nanobot
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN sed -i 's/\r$//' /usr/local/bin/entrypoint.sh && chmod +x /usr/local/bin/entrypoint.sh
