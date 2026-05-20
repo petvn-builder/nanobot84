@@ -9,7 +9,7 @@
       "provider": "openrouter",
       "model": "${NANOBOT_MODEL}",
       "workspace": "/home/nanobot/.nanobot/workspace",
-      "unifiedSession": true
+      "unifiedSession": false
     }
   },
   "channels": {
