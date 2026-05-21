@@ -2,7 +2,10 @@
   "providers": {
     "9router": {
       "apiKey": "${NANOBOT_9ROUTER_API_KEY}",
-      "apiBase": "${NANOBOT_9ROUTER_BASE_URL}"
+      "apiBase": "${NANOBOT_9ROUTER_BASE_URL}",
+      "extraHeaders": {
+        "User-Agent": "nanobot/0.2.0"
+      }
     }
   },
   "agents": {
