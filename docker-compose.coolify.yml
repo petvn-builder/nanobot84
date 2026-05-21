@@ -11,9 +11,13 @@ services:
         exec /usr/local/bin/entrypoint.sh gateway
     restart: unless-stopped
     environment:
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      TELEGRAM_TOKEN: ${TELEGRAM_TOKEN}
+      TELEGRAM_ALLOW_FROM: ${TELEGRAM_ALLOW_FROM}
+      NANOBOT_PROVIDER: ${NANOBOT_PROVIDER}
+      NANOBOT_9ROUTER_BASE_URL: ${NANOBOT_9ROUTER_BASE_URL}
+      NANOBOT_9ROUTER_API_KEY: ${NANOBOT_9ROUTER_API_KEY}
+      NANOBOT_9ROUTER_MODEL: ${NANOBOT_9ROUTER_MODEL}
       NANOBOT_WEB_TOKEN: ${NANOBOT_WEB_TOKEN}
-      NANOBOT_MODEL: ${NANOBOT_MODEL}
     volumes:
       - nanobot_data:/home/nanobot/.nanobot
     ports:

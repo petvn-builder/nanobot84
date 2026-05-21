@@ -876,6 +876,7 @@ class AgentRunner:
                     params if isinstance(params, dict) else None,
                 )],
             )
+        logger.info("Tool call started: name={} id={}", tool_call.name, tool_call.id)
         try:
             if tool is not None:
                 result = await tool.execute(**params)
@@ -894,6 +895,12 @@ class AgentRunner:
                 "status": "error",
                 "detail": str(exc),
             }
+            logger.warning(
+                "Tool call failed: name={} id={} error={}",
+                tool_call.name,
+                tool_call.id,
+                type(exc).__name__,
+            )
             payload = f"Error: {type(exc).__name__}: {exc}"
             handled = self._classify_violation(
                 raw_text=str(exc),
@@ -915,6 +922,7 @@ class AgentRunner:
                     progress_callback,
                     [build_file_edit_error_event(file_edit_tracker, result)],
                 )
+            logger.warning("Tool call returned error: name={} id={}", tool_call.name, tool_call.id)
             event = {
                 "name": tool_call.name,
                 "status": "error",
@@ -948,6 +956,7 @@ class AgentRunner:
             detail = "(empty)"
         elif len(detail) > 120:
             detail = detail[:120] + "..."
+        logger.info("Tool call completed: name={} id={}", tool_call.name, tool_call.id)
         return result, {"name": tool_call.name, "status": "ok", "detail": detail}, None
 
     # SSRF is a hard security block at the tool boundary, but the agent turn

@@ -95,6 +95,16 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
         backend="openai_compat",
         is_direct=True,
     ),
+    ProviderSpec(
+        name="nine_router",
+        keywords=("9router",),
+        env_key="NANOBOT_9ROUTER_API_KEY",
+        display_name="9Router",
+        backend="openai_compat",
+        is_gateway=True,
+        default_api_base="https://9router.pvn.world/v1",
+        detect_by_base_keyword="9router.pvn.world",
+    ),
 
     # === Azure OpenAI (direct API calls with API version 2024-10-21) =====
     ProviderSpec(
@@ -509,6 +519,8 @@ PROVIDERS: tuple[ProviderSpec, ...] = (
 def find_by_name(name: str) -> ProviderSpec | None:
     """Find a provider spec by config field name, e.g. "dashscope"."""
     normalized = to_snake(name.replace("-", "_"))
+    if normalized == "9router":
+        normalized = "nine_router"
     for spec in PROVIDERS:
         if spec.name == normalized:
             return spec

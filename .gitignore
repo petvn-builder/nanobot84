@@ -90,6 +90,7 @@ nano.*.save
 # Environment & secrets (keep examples tracked if needed)
 .env.*
 !.env.example
+!.env.coolify.example
 
 # Logs & temp
 *.log

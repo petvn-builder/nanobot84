@@ -10,24 +10,31 @@
       "provider": "${NANOBOT_PROVIDER}",
       "model": "${NANOBOT_9ROUTER_MODEL}",
       "workspace": "/home/nanobot/.nanobot/workspace",
-      "unifiedSession": false
+      "unifiedSession": true,
+      "maxConcurrentSubagents": 1
     }
   },
   "channels": {
-    "websocket": {
+    "telegram": {
       "enabled": true,
-      "host": "0.0.0.0",
-      "port": 8765,
-      "token": "${NANOBOT_WEB_TOKEN}",
-      "websocketRequiresToken": true,
-      "allowFrom": [
-        "*"
-      ]
+      "token": "${TELEGRAM_TOKEN}",
+      "allowFrom": ["${TELEGRAM_ALLOW_FROM}"]
+    },
+    "websocket": {
+      "enabled": false,
+      "allowFrom": []
     }
   },
   "gateway": {
-    "host": "0.0.0.0",
-    "port": 18790
+    "host": "127.0.0.1",
+    "port": 18790,
+    "heartbeat": {
+      "enabled": true
+    }
+  },
+  "api": {
+    "host": "127.0.0.1",
+    "port": 8900
   },
   "tools": {
     "restrictToWorkspace": true,
@@ -35,6 +42,13 @@
       "enable": false,
       "sandbox": "bwrap",
       "pathAppend": "/home/nanobot/.local/bin:/usr/local/bin"
-    }
+    },
+    "web": {
+      "enable": false
+    },
+    "imageGeneration": {
+      "enabled": false
+    },
+    "mcpServers": {}
   }
 }

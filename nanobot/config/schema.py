@@ -184,6 +184,10 @@ class ProvidersConfig(Base):
     """Configuration for LLM providers."""
 
     custom: ProviderConfig = Field(default_factory=ProviderConfig)  # Any OpenAI-compatible endpoint
+    nine_router: ProviderConfig = Field(
+        default_factory=ProviderConfig,
+        alias="9router",
+    )  # 9Router OpenAI-compatible gateway
     azure_openai: ProviderConfig = Field(default_factory=ProviderConfig)  # Azure OpenAI (model = deployment name)
     bedrock: BedrockProviderConfig = Field(default_factory=BedrockProviderConfig)  # AWS Bedrock Converse
     anthropic: ProviderConfig = Field(default_factory=ProviderConfig)

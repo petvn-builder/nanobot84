@@ -132,6 +132,7 @@ ANTHROPIC_API_KEY="$(bw get password api/anthropic)" nanobot agent
 | Provider | Purpose | Get API Key |
 |----------|---------|-------------|
 | `custom` | Any OpenAI-compatible endpoint | — |
+| `9router` | LLM gateway via 9Router's OpenAI-compatible endpoint | 9Router dashboard |
 | `openrouter` | LLM (recommended, access to all models) | [openrouter.ai](https://openrouter.ai) |
 | `huggingface` | LLM (Hugging Face Inference Providers) | [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) |
 | `skywork` | LLM (Skywork / APIFree API gateway) | [apifree.ai](https://www.apifree.ai) |

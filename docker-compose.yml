@@ -4,6 +4,19 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
+  entrypoint:
+    - /bin/sh
+    - -c
+    - |
+      python /app/scripts/render_config.py
+      exec /usr/local/bin/entrypoint.sh "$$@"
+    - nanobot-entrypoint
+  environment:
+    NANOBOT_PROVIDER: ${NANOBOT_PROVIDER}
+    NANOBOT_9ROUTER_BASE_URL: ${NANOBOT_9ROUTER_BASE_URL}
+    NANOBOT_9ROUTER_API_KEY: ${NANOBOT_9ROUTER_API_KEY}
+    NANOBOT_9ROUTER_MODEL: ${NANOBOT_9ROUTER_MODEL}
+    NANOBOT_WEB_TOKEN: ${NANOBOT_WEB_TOKEN}
   cap_drop:
     - ALL
   cap_add:
