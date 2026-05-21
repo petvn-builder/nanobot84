@@ -48,7 +48,7 @@
       "pathAppend": "/home/nanobot/.local/bin:/usr/local/bin"
     },
     "web": {
-      "enable": false
+      "enable": true
     },
     "imageGeneration": {
       "enabled": false
