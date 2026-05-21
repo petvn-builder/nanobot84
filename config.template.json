@@ -20,6 +20,7 @@
       "port": 8765,
       "token": "${NANOBOT_WEB_TOKEN}",
       "websocketRequiresToken": true,
+      "streaming": false,
       "allowFrom": [
         "*"
       ]
@@ -35,6 +36,14 @@
       "enable": false,
       "sandbox": "bwrap",
       "pathAppend": "/home/nanobot/.local/bin:/usr/local/bin"
+    },
+    "web": {
+      "enable": false
+    },
+    "imageGeneration": {
+      "enabled": false
+    },
+    "mcpServers": {
     }
   }
 }
