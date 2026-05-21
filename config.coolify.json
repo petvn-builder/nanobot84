@@ -43,7 +43,7 @@
   "tools": {
     "restrictToWorkspace": true,
     "exec": {
-      "enable": false,
+      "enable": true,
       "sandbox": "bwrap",
       "pathAppend": "/home/nanobot/.local/bin:/usr/local/bin"
     },

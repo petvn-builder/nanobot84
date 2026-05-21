@@ -7,7 +7,7 @@ services:
       - /bin/sh
       - -c
       - |
-        python /app/scripts/render_config.py
+        python /app/scripts/render_config.py --template /app/config.coolify.json
         exec /usr/local/bin/entrypoint.sh gateway
     restart: unless-stopped
     environment:
@@ -20,6 +20,7 @@ services:
       NANOBOT_WEB_TOKEN: ${NANOBOT_WEB_TOKEN}
     volumes:
       - nanobot_data:/home/nanobot/.nanobot
+      - /home/opc/coolify/exports/nanobot:/home/nanobot/exports
     ports:
       - "8765:8765"
       - "18790:18790"

@@ -26,6 +26,7 @@ COPY nanobot/ nanobot/
 COPY bridge/ bridge/
 COPY webui/ webui/
 COPY config.template.json config.template.json
+COPY config.coolify.json config.coolify.json
 COPY scripts/render_config.py scripts/render_config.py
 RUN uv pip install --system --no-cache .
 
