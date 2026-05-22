@@ -1574,20 +1574,21 @@ async def test_default_chat_id_routes_webui_to_configured_root(
             await client.send(json.dumps({"type": "new_chat"}))
             attached = json.loads(await client.recv())
             assert attached["event"] == "attached"
-            assert attached["chat_id"] == "unified:default"
+            new_chat_id = attached["chat_id"]
+            assert new_chat_id != "unified:default"
 
             await client.send(
                 json.dumps({
                     "type": "message",
-                    "chat_id": "unified:default",
-                    "content": "hi root",
+                    "chat_id": new_chat_id,
+                    "content": "hi new",
                     "webui": True,
                 })
             )
             await asyncio.sleep(0.1)
             inbound = bus.publish_inbound.call_args[0][0]
-            assert inbound.chat_id == "unified:default"
-            assert inbound.session_key_override == "unified:default"
+            assert inbound.chat_id == new_chat_id
+            assert inbound.session_key_override is None
             assert inbound.metadata["webui"] is True
     finally:
         await channel.stop()

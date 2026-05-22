@@ -1479,7 +1479,7 @@ class WebSocketChannel(BaseChannel):
         """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
         t = envelope.get("type")
         if t == "new_chat":
-            new_id = self._default_chat_id()
+            new_id = str(uuid.uuid4())
             self._attach(connection, new_id)
             await self._send_event(connection, "attached", chat_id=new_id)
             await self._hydrate_after_subscribe(new_id)
