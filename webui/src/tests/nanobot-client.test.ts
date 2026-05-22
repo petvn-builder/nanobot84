@@ -274,6 +274,27 @@ describe("NanobotClient", () => {
     expect(chatHandler).not.toHaveBeenCalled();
   });
 
+  it("dispatches a session update when the ready default chat arrives", () => {
+    const client = new NanobotClient({
+      url: "ws://test",
+      reconnect: false,
+      socketFactory: (url) => new FakeSocket(url) as unknown as WebSocket,
+    });
+    const globalHandler = vi.fn();
+    client.onSessionUpdate(globalHandler);
+    client.connect();
+    lastSocket().fakeOpen();
+
+    lastSocket().fakeMessage({
+      event: "ready",
+      chat_id: "unified:default",
+      client_id: "web",
+    });
+
+    expect(client.defaultChatId).toBe("unified:default");
+    expect(globalHandler).toHaveBeenCalledWith("unified:default", "thread");
+  });
+
   it("resolves newChat() via the server-assigned chat_id", async () => {
     const client = new NanobotClient({
       url: "ws://test",

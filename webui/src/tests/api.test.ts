@@ -186,6 +186,31 @@ describe("webui API helpers", () => {
     ]);
   });
 
+  it("maps websocket session keys whose chat ids contain colons", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        sessions: [
+          {
+            key: "websocket:unified:default",
+            created_at: "2026-05-22T10:00:00",
+            updated_at: "2026-05-22T10:01:00",
+            preview: "hello from web",
+          },
+        ],
+      }),
+    } as Response);
+
+    await expect(listSessions("tok")).resolves.toMatchObject([
+      {
+        key: "websocket:unified:default",
+        channel: "websocket",
+        chatId: "unified:default",
+        preview: "hello from web",
+      },
+    ]);
+  });
+
   it("maps slash command metadata from the commands endpoint", async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

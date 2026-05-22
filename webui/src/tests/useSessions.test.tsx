@@ -157,6 +157,52 @@ describe("useSessions", () => {
     expect(api.listSessions).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps an optimistic default chat when refresh has not listed it yet", async () => {
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("unified:default");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.createChat();
+    });
+    expect(result.current.sessions.map((s) => s.key)).toEqual([
+      "websocket:unified:default",
+    ]);
+
+    act(() => {
+      client.emitSessionUpdate("unified:default");
+    });
+
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+    expect(result.current.sessions.map((s) => s.key)).toEqual([
+      "websocket:unified:default",
+    ]);
+  });
+
+  it("adds the websocket ready default chat when the sessions endpoint omits it", async () => {
+    vi.mocked(api.listSessions).mockResolvedValue([]);
+    const client = fakeClient();
+    client.defaultChatId = "unified:default";
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() =>
+      expect(result.current.sessions.map((s) => s.key)).toEqual([
+        "websocket:unified:default",
+      ]),
+    );
+  });
+
   it("passes through WebUI transcript user media as images and media", async () => {
     vi.mocked(api.fetchWebuiThread).mockResolvedValue({
       schemaVersion: 3,

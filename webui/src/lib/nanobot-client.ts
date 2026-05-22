@@ -360,6 +360,7 @@ export class NanobotClient {
     if (parsed.event === "ready") {
       this.readyChatId = parsed.chat_id;
       this.knownChats.add(parsed.chat_id);
+      this.emitSessionUpdate(parsed.chat_id, "thread");
       return;
     }
 

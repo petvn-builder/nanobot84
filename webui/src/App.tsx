@@ -40,6 +40,7 @@ type BootState =
     };
 
 const SIDEBAR_STORAGE_KEY = "nanobot-webui.sidebar";
+const ACTIVE_SESSION_STORAGE_KEY = "nanobot-webui.active-session-key.v1";
 const COMPLETED_RUNS_STORAGE_KEY = "nanobot-webui.sidebar.completed-runs.v1";
 const RESTART_STARTED_KEY = "nanobot-webui.restartStartedAt";
 const SIDEBAR_WIDTH = 272;
@@ -122,6 +123,28 @@ function readSidebarOpen(): boolean {
     return raw === "1";
   } catch {
     return true;
+  }
+}
+
+function readActiveSessionKey(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(ACTIVE_SESSION_STORAGE_KEY);
+    return raw && raw.trim() ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveSessionKey(key: string | null): void {
+  try {
+    if (key) {
+      window.localStorage.setItem(ACTIVE_SESSION_STORAGE_KEY, key);
+    } else {
+      window.localStorage.removeItem(ACTIVE_SESSION_STORAGE_KEY);
+    }
+  } catch {
+    // ignore storage errors (private mode, etc.)
   }
 }
 
@@ -322,7 +345,7 @@ function Shell({
   const { sessions, loading, refresh, createChat, deleteChat } = useSessions();
   const { state: sidebarState, update: updateSidebarState } =
     useSidebarState(sessions, !loading);
-  const [activeKey, setActiveKey] = useState<string | null>(null);
+  const [activeKey, setActiveKey] = useState<string | null>(readActiveSessionKey);
   const [view, setView] = useState<ShellView>("chat");
   const [desktopSidebarOpen, setDesktopSidebarOpen] =
     useState<boolean>(readSidebarOpen);
@@ -357,6 +380,19 @@ function Shell({
   useEffect(() => {
     writeCompletedRunChatIds(completedChatIds);
   }, [completedChatIds]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (!activeKey) return;
+    if (sessions.some((session) => session.key === activeKey)) {
+      writeActiveSessionKey(activeKey);
+      return;
+    }
+    if (sessions.length === 0) return;
+    const fallbackKey = sessions[0]?.key ?? null;
+    setActiveKey(fallbackKey);
+    writeActiveSessionKey(fallbackKey);
+  }, [activeKey, loading, sessions]);
 
   const activeSession = useMemo<ChatSummary | null>(() => {
     if (!activeKey) return null;
@@ -429,7 +465,9 @@ function Shell({
   const onCreateChat = useCallback(async () => {
     try {
       const chatId = await createChat();
-      setActiveKey(`websocket:${chatId}`);
+      const key = `websocket:${chatId}`;
+      setActiveKey(key);
+      writeActiveSessionKey(key);
       setView("chat");
       setMobileSidebarOpen(false);
       return chatId;
@@ -441,6 +479,7 @@ function Shell({
 
   const onNewChat = useCallback(() => {
     setActiveKey(null);
+    writeActiveSessionKey(null);
     setView("chat");
     setMobileSidebarOpen(false);
   }, []);
@@ -457,6 +496,7 @@ function Shell({
         });
       }
       setActiveKey(key);
+      writeActiveSessionKey(key);
       setView("chat");
       setMobileSidebarOpen(false);
     },
@@ -526,7 +566,9 @@ function Shell({
       if (activeKey === key && !sidebarState.archived_keys.includes(key)) {
         const archived = new Set([...sidebarState.archived_keys, key]);
         const next = sessions.find((session) => !archived.has(session.key));
-        setActiveKey(next?.key ?? null);
+        const nextKey = next?.key ?? null;
+        setActiveKey(nextKey);
+        writeActiveSessionKey(nextKey);
       }
     },
     [activeKey, sessions, sidebarState.archived_keys, updateSidebarState],
@@ -578,9 +620,17 @@ function Shell({
     setView("chat");
     setMobileSidebarOpen(false);
     setActiveKey((current) => {
-      if (!current) return null;
-      if (sessions.some((session) => session.key === current)) return current;
-      return sessions[0]?.key ?? null;
+      if (!current) {
+        writeActiveSessionKey(null);
+        return null;
+      }
+      if (sessions.some((session) => session.key === current)) {
+        writeActiveSessionKey(current);
+        return current;
+      }
+      const nextKey = sessions[0]?.key ?? null;
+      writeActiveSessionKey(nextKey);
+      return nextKey;
     });
   }, [sessions]);
 
@@ -669,11 +719,17 @@ function Shell({
       ? (sessions[currentIndex + 1]?.key ?? sessions[currentIndex - 1]?.key ?? null)
       : activeKey;
     setPendingDelete(null);
-    if (deletingActive) setActiveKey(fallbackKey);
+    if (deletingActive) {
+      setActiveKey(fallbackKey);
+      writeActiveSessionKey(fallbackKey);
+    }
     try {
       await deleteChat(key);
     } catch (e) {
-      if (deletingActive) setActiveKey(key);
+      if (deletingActive) {
+        setActiveKey(key);
+        writeActiveSessionKey(key);
+      }
       console.error("Failed to delete session", e);
     }
   }, [pendingDelete, deleteChat, activeKey, sessions]);

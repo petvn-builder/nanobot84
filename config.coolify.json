@@ -24,20 +24,25 @@
       "allowFrom": ["${TELEGRAM_ALLOW_FROM}"]
     },
     "websocket": {
-      "enabled": false,
+      "enabled": true,
+      "host": "0.0.0.0",
+      "port": 8765,
+      "defaultChatId": "unified:default",
+      "token": "${NANOBOT_WEB_TOKEN}",
+      "websocketRequiresToken": true,
       "streaming": false,
-      "allowFrom": []
+      "allowFrom": ["*"]
     }
   },
   "gateway": {
-    "host": "127.0.0.1",
+    "host": "0.0.0.0",
     "port": 18790,
     "heartbeat": {
       "enabled": true
     }
   },
   "api": {
-    "host": "127.0.0.1",
+    "host": "0.0.0.0",
     "port": 8900
   },
   "tools": {

@@ -101,6 +101,7 @@ describe("App layout", () => {
     attachSpy.mockReset();
     runStatusHandlers.clear();
     localStorage.removeItem("nanobot-webui.sidebar.completed-runs.v1");
+    localStorage.removeItem("nanobot-webui.active-session-key.v1");
     vi.mocked(fetchBootstrap).mockReset().mockResolvedValue({
       token: "tok",
       ws_path: "/",
@@ -186,6 +187,89 @@ describe("App layout", () => {
     expect(screen.queryByText("Delete this chat?")).not.toBeInTheDocument();
     expect(document.body.style.pointerEvents).not.toBe("none");
   }, 15_000);
+
+  it("restores the active chat after a browser reload", async () => {
+    mockSessions = [
+      {
+        key: "websocket:unified:default",
+        channel: "websocket",
+        chatId: "unified:default",
+        createdAt: "2026-05-22T10:00:00Z",
+        updatedAt: "2026-05-22T10:01:00Z",
+        preview: "Restored chat",
+      },
+    ];
+    localStorage.setItem(
+      "nanobot-webui.active-session-key.v1",
+      "websocket:unified:default",
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getAllByText("Restored chat")).toHaveLength(2),
+    );
+  });
+
+  it("falls back to the newest session when the saved active chat no longer exists", async () => {
+    mockSessions = [
+      {
+        key: "websocket:latest",
+        channel: "websocket",
+        chatId: "latest",
+        createdAt: "2026-05-22T11:00:00Z",
+        updatedAt: "2026-05-22T11:01:00Z",
+        preview: "Latest chat",
+      },
+      {
+        key: "websocket:older",
+        channel: "websocket",
+        chatId: "older",
+        createdAt: "2026-05-22T10:00:00Z",
+        updatedAt: "2026-05-22T10:01:00Z",
+        preview: "Older chat",
+      },
+    ];
+    localStorage.setItem(
+      "nanobot-webui.active-session-key.v1",
+      "websocket:missing",
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getAllByText("Latest chat")).toHaveLength(2),
+    );
+    expect(localStorage.getItem("nanobot-webui.active-session-key.v1")).toBe(
+      "websocket:latest",
+    );
+  });
+
+  it("clears the saved active chat when starting a new chat", async () => {
+    mockSessions = [
+      {
+        key: "websocket:chat-a",
+        channel: "websocket",
+        chatId: "chat-a",
+        createdAt: "2026-05-22T10:00:00Z",
+        updatedAt: "2026-05-22T10:01:00Z",
+        preview: "Existing chat",
+      },
+    ];
+    localStorage.setItem(
+      "nanobot-webui.active-session-key.v1",
+      "websocket:chat-a",
+    );
+
+    render(<App />);
+
+    await waitFor(() => expect(connectSpy).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+
+    expect(localStorage.getItem("nanobot-webui.active-session-key.v1")).toBeNull();
+  });
 
   it("keeps the mobile session action menu inside the sidebar sheet", async () => {
     mockSessions = [

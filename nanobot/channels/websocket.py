@@ -18,6 +18,7 @@ import ssl
 import time
 import uuid
 from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import parse_qs, unquote, urlparse
@@ -57,7 +58,12 @@ from nanobot.webui.sidebar_state import (
     write_webui_sidebar_state,
 )
 from nanobot.webui.thread_disk import delete_webui_thread
-from nanobot.webui.transcript import append_transcript_object, build_webui_thread_response
+from nanobot.webui.transcript import (
+    append_transcript_object,
+    build_webui_thread_response,
+    read_transcript_lines,
+    webui_transcript_path,
+)
 
 if TYPE_CHECKING:
     from nanobot.session.manager import SessionManager
@@ -104,6 +110,7 @@ class WebSocketConfig(Base):
     websocket_requires_token: bool = True
     allow_from: list[str] = Field(default_factory=lambda: ["*"])
     streaming: bool = True
+    default_chat_id: str = ""
     # Default 36 MB, upper 40 MB: supports up to 4 images at ~6 MB each after
     # client-side Worker normalization (see webui Composer). 4 × 6 MB × 1.37
     # (base64 overhead) + envelope framing stays under 36 MB; the 40 MB ceiling
@@ -481,6 +488,29 @@ class WebSocketChannel(BaseChannel):
 
     # -- Subscription bookkeeping -------------------------------------------
 
+    def _default_chat_id(self) -> str:
+        configured = self.config.default_chat_id.strip()
+        if configured:
+            if _is_valid_chat_id(configured):
+                return configured
+            self.logger.warning("Ignoring invalid websocket default_chat_id: {}", configured)
+        return str(uuid.uuid4())
+
+    def _session_key_for_chat(self, chat_id: str) -> str | None:
+        configured = self.config.default_chat_id.strip()
+        if configured and chat_id == configured:
+            return configured
+        return None
+
+    def _default_webui_session_key(self) -> str | None:
+        configured = self.config.default_chat_id.strip()
+        if not configured:
+            return None
+        if not _is_valid_chat_id(configured):
+            self.logger.warning("Ignoring invalid websocket default_chat_id: {}", configured)
+            return None
+        return f"websocket:{configured}"
+
     def _attach(self, connection: Any, chat_id: str) -> None:
         """Idempotently subscribe *connection* to *chat_id*."""
         self._subs.setdefault(chat_id, set()).add(connection)
@@ -765,6 +795,7 @@ class WebSocketChannel(BaseChannel):
         # Sidebar/chat listing for WS-backed sessions only — CLI / Slack / etc.
         # keys are not intended for resume over this HTTP surface.
         cleaned = []
+        by_key = {s.get("key"): s for s in sessions if isinstance(s.get("key"), str)}
         for s in sessions:
             key = s.get("key")
             if not (isinstance(key, str) and key.startswith("websocket:")):
@@ -775,7 +806,85 @@ class WebSocketChannel(BaseChannel):
             if started_at is not None:
                 row["run_started_at"] = started_at
             cleaned.append(row)
+        default_row = self._default_webui_session_row(by_key)
+        if default_row is not None:
+            for idx, row in enumerate(cleaned):
+                if row.get("key") == default_row["key"]:
+                    cleaned[idx] = {**row, **default_row}
+                    break
+            else:
+                cleaned.append(default_row)
+        cleaned.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
         return _http_json_response({"sessions": cleaned})
+
+    def _default_webui_session_row(self, by_key: dict[Any, dict[str, Any]]) -> dict[str, Any] | None:
+        webui_key = self._default_webui_session_key()
+        if webui_key is None:
+            return None
+        chat_id = webui_key.split(":", 1)[1]
+        transcript_path = webui_transcript_path(webui_key)
+        transcript_exists = transcript_path.is_file()
+        agent_row = by_key.get(chat_id)
+        webui_row = by_key.get(webui_key)
+        source = webui_row if isinstance(webui_row, dict) else agent_row
+        if not transcript_exists and not isinstance(source, dict):
+            return None
+
+        row: dict[str, Any] = {
+            "key": webui_key,
+            "created_at": None,
+            "updated_at": None,
+            "title": "",
+            "preview": "",
+        }
+        if isinstance(source, dict):
+            row.update({k: v for k, v in source.items() if k != "path"})
+            row["key"] = webui_key
+
+        preview = self._webui_transcript_preview(webui_key)
+        if preview:
+            row["preview"] = preview
+        elif not isinstance(row.get("preview"), str):
+            row["preview"] = ""
+
+        if not isinstance(row.get("title"), str):
+            row["title"] = ""
+
+        transcript_updated_at = self._webui_transcript_updated_at(transcript_path)
+        if transcript_updated_at is not None:
+            row["updated_at"] = transcript_updated_at
+        elif not row.get("updated_at"):
+            row["updated_at"] = row.get("created_at")
+        if not row.get("created_at"):
+            row["created_at"] = row.get("updated_at")
+
+        started_at = websocket_turn_wall_started_at(chat_id)
+        if started_at is not None:
+            row["run_started_at"] = started_at
+        return row
+
+    @staticmethod
+    def _webui_transcript_updated_at(path: Path) -> str | None:
+        if not path.is_file():
+            return None
+        try:
+            return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+        except OSError:
+            return None
+
+    @staticmethod
+    def _webui_transcript_preview(session_key: str) -> str:
+        for rec in read_transcript_lines(session_key):
+            text = rec.get("text")
+            if not isinstance(text, str):
+                continue
+            text = re.sub(r"\s+", " ", text).strip()
+            if not text:
+                continue
+            if len(text) > 120:
+                text = text[:119].rstrip() + "…"
+            return text
+        return ""
 
     def _handle_settings(self, request: WsRequest) -> Response:
         if not self._check_api_token(request):
@@ -1110,9 +1219,9 @@ class WebSocketChannel(BaseChannel):
         # websocket-channel sessions; deletion unlinks local JSONL — keep scope narrow.
         if not self._is_websocket_channel_session_key(decoded_key):
             return _http_error(404, "session not found")
-        deleted = self._session_manager.delete_session(decoded_key)
-        delete_webui_thread(decoded_key)
-        return _http_json_response({"deleted": bool(deleted)})
+        deleted_session = self._session_manager.delete_session(decoded_key)
+        deleted_thread = delete_webui_thread(decoded_key)
+        return _http_json_response({"deleted": bool(deleted_session or deleted_thread)})
 
     def _serve_static(self, request_path: str) -> Response | None:
         """Resolve *request_path* against the built SPA directory; SPA fallback to index.html."""
@@ -1243,7 +1352,7 @@ class WebSocketChannel(BaseChannel):
             self.logger.warning("client_id too long ({} chars), truncating", len(client_id))
             client_id = client_id[:128]
 
-        default_chat_id = str(uuid.uuid4())
+        default_chat_id = self._default_chat_id()
 
         try:
             await connection.send(
@@ -1285,6 +1394,7 @@ class WebSocketChannel(BaseChannel):
                     chat_id=default_chat_id,
                     content=content,
                     metadata={"remote": getattr(connection, "remote_address", None)},
+                    session_key=self._session_key_for_chat(default_chat_id),
                     is_dm=False,
                 )
         except Exception as e:
@@ -1369,7 +1479,7 @@ class WebSocketChannel(BaseChannel):
         """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
         t = envelope.get("type")
         if t == "new_chat":
-            new_id = str(uuid.uuid4())
+            new_id = self._default_chat_id()
             self._attach(connection, new_id)
             await self._send_event(connection, "attached", chat_id=new_id)
             await self._hydrate_after_subscribe(new_id)
@@ -1434,6 +1544,7 @@ class WebSocketChannel(BaseChannel):
                 content=content,
                 media=media_paths or None,
                 metadata=metadata,
+                session_key=self._session_key_for_chat(cid),
                 is_dm=False,
             )
             return

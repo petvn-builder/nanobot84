@@ -27,13 +27,41 @@ export function useSessions(): {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(token);
+  const optimisticSessionsRef = useRef<Map<string, ChatSummary>>(new Map());
+  const locallyDeletedKeysRef = useRef<Set<string>>(new Set());
   tokenRef.current = token;
 
   const refresh = useCallback(async () => {
     try {
       setLoading(true);
       const rows = await listSessions(tokenRef.current);
-      setSessions(rows);
+      const merged = [...rows];
+      const seen = new Set(merged.map((row) => row.key));
+      for (const [key, optimistic] of optimisticSessionsRef.current) {
+        if (seen.has(key)) {
+          optimisticSessionsRef.current.delete(key);
+          continue;
+        }
+        merged.push(optimistic);
+        seen.add(key);
+      }
+      const defaultChatId = client.defaultChatId;
+      if (defaultChatId) {
+        const defaultKey = `websocket:${defaultChatId}`;
+        if (!seen.has(defaultKey) && !locallyDeletedKeysRef.current.has(defaultKey)) {
+          const now = new Date().toISOString();
+          merged.unshift({
+            key: defaultKey,
+            channel: "websocket",
+            chatId: defaultChatId,
+            createdAt: now,
+            updatedAt: now,
+            title: "",
+            preview: "",
+          });
+        }
+      }
+      setSessions(merged);
       setError(null);
     } catch (e) {
       const msg =
@@ -42,7 +70,7 @@ export function useSessions(): {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [client]);
 
   useEffect(() => {
     void refresh();
@@ -57,18 +85,21 @@ export function useSessions(): {
   const createChat = useCallback(async (): Promise<string> => {
     const chatId = await client.newChat();
     const key = `websocket:${chatId}`;
+    const optimistic: ChatSummary = {
+      key,
+      channel: "websocket",
+      chatId,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      title: "",
+      preview: "",
+    };
+    locallyDeletedKeysRef.current.delete(key);
+    optimisticSessionsRef.current.set(key, optimistic);
     // Optimistic insert; a subsequent refresh will replace it with the
     // authoritative row once the server persists the session.
     setSessions((prev) => [
-      {
-        key,
-        channel: "websocket",
-        chatId,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        title: "",
-        preview: "",
-      },
+      optimistic,
       ...prev.filter((s) => s.key !== key),
     ]);
     return chatId;
@@ -77,6 +108,8 @@ export function useSessions(): {
   const deleteChat = useCallback(
     async (key: string) => {
       await apiDeleteSession(tokenRef.current, key);
+      optimisticSessionsRef.current.delete(key);
+      locallyDeletedKeysRef.current.add(key);
       setSessions((prev) => prev.filter((s) => s.key !== key));
     },
     [],

@@ -1555,6 +1555,46 @@ async def test_multiplex_new_chat_roundtrip(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
+async def test_default_chat_id_routes_webui_to_configured_root(
+    bus: MagicMock,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    port = 29962
+    channel = _ch(bus, port=port, defaultChatId="unified:default")
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+
+    try:
+        async with websockets.connect(f"ws://127.0.0.1:{port}/ws?client_id=root") as client:
+            ready = json.loads(await client.recv())
+            assert ready["chat_id"] == "unified:default"
+
+            await client.send(json.dumps({"type": "new_chat"}))
+            attached = json.loads(await client.recv())
+            assert attached["event"] == "attached"
+            assert attached["chat_id"] == "unified:default"
+
+            await client.send(
+                json.dumps({
+                    "type": "message",
+                    "chat_id": "unified:default",
+                    "content": "hi root",
+                    "webui": True,
+                })
+            )
+            await asyncio.sleep(0.1)
+            inbound = bus.publish_inbound.call_args[0][0]
+            assert inbound.chat_id == "unified:default"
+            assert inbound.session_key_override == "unified:default"
+            assert inbound.metadata["webui"] is True
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
 async def test_multiplex_two_chats_isolated(bus: MagicMock) -> None:
     port = 29932
     channel = _ch(bus, port=port)
@@ -1715,6 +1755,56 @@ def test_sessions_list_includes_active_run_started_at() -> None:
             "run_started_at": 1_700_000_000.0,
         }
     ]
+
+
+def test_sessions_list_exposes_configured_default_chat_transcript(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from websockets.datastructures import Headers
+    from websockets.http11 import Request
+
+    from nanobot.webui.transcript import append_transcript_object
+
+    monkeypatch.setattr("nanobot.config.paths.get_data_dir", lambda: tmp_path)
+    default_chat_id = "unified:default"
+    webui_key = f"websocket:{default_chat_id}"
+    append_transcript_object(
+        webui_key,
+        {"event": "user", "chat_id": default_chat_id, "text": "hello from web"},
+    )
+    bus = MagicMock()
+    channel = _ch(bus, defaultChatId=default_chat_id)
+    channel._api_tokens["tok"] = time.monotonic() + 300.0
+    channel._session_manager = MagicMock()
+    channel._session_manager.list_sessions.return_value = [
+        {
+            "key": default_chat_id,
+            "created_at": "2026-05-22T10:00:00Z",
+            "updated_at": "2026-05-22T10:01:00Z",
+            "title": "Shared root",
+            "preview": "agent memory",
+            "path": "/private/path",
+        },
+        {
+            "key": "cli:private",
+            "created_at": "2026-05-22T09:00:00Z",
+            "updated_at": "2026-05-22T09:01:00Z",
+        },
+    ]
+
+    req = Request("/api/sessions", Headers([("Authorization", "Bearer tok")]))
+    resp = channel._handle_sessions_list(req)
+
+    assert resp.status_code == 200
+    body = json.loads(resp.body.decode())
+    assert len(body["sessions"]) == 1
+    row = body["sessions"][0]
+    assert row["key"] == webui_key
+    assert row["created_at"] == "2026-05-22T10:00:00Z"
+    assert row["updated_at"]
+    assert row["title"] == "Shared root"
+    assert row["preview"] == "hello from web"
 
 
 @pytest.mark.parametrize(

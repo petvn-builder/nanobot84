@@ -788,6 +788,8 @@ export function ThreadComposer({
           <RunElapsedStrip startedAt={runStartedAt} goalState={goalState} />
         ) : null}
         <textarea
+          id="nanobot-thread-composer"
+          name="message"
           ref={textareaRef}
           value={value}
           onChange={(e) => {
@@ -830,6 +832,8 @@ export function ThreadComposer({
         >
           <div className="flex min-w-0 items-center gap-2">
             <input
+              id="nanobot-thread-attachments"
+              name="attachments"
               ref={fileInputRef}
               type="file"
               accept={ACCEPT_ATTR}
