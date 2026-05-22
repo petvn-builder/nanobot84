@@ -13,6 +13,7 @@
       "provider": "${NANOBOT_PROVIDER}",
       "model": "${NANOBOT_9ROUTER_MODEL}",
       "workspace": "/home/nanobot/.nanobot/workspace",
+      "timezone": "Asia/Ho_Chi_Minh",
       "unifiedSession": true,
       "maxConcurrentSubagents": 1
     }
