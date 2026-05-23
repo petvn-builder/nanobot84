@@ -6,10 +6,11 @@ import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 import httpx
 import pytest
+import websockets
 
 from nanobot.channels.websocket import WebSocketChannel
 from nanobot.session.manager import Session, SessionManager
@@ -172,6 +173,55 @@ async def test_sessions_list_only_returns_websocket_sessions_by_default(
         # Only websocket-channel sessions are part of the webui surface; CLI /
         # Slack / Lark rows would be non-resumable from the browser.
         assert keys == {"websocket:alpha", "websocket:beta"}
+    finally:
+        await channel.stop()
+        await server_task
+
+
+@pytest.mark.asyncio
+async def test_new_chat_is_persisted_before_first_message(
+    bus: MagicMock, tmp_path: Path
+) -> None:
+    sm = SessionManager(tmp_path)
+    port = 29912
+    channel = _ch(bus, session_manager=sm, port=port)
+    server_task = asyncio.create_task(channel.start())
+    await asyncio.sleep(0.3)
+    try:
+        boot = await _http_get(f"http://127.0.0.1:{port}/webui/bootstrap")
+        token = boot.json()["token"]
+        auth = {"Authorization": f"Bearer {token}"}
+
+        async with websockets.connect(f"ws://127.0.0.1:{port}/?client_id=persist") as client:
+            await client.recv()  # ready
+            await client.send(json.dumps({"type": "new_chat"}))
+            attached = json.loads(await client.recv())
+
+        assert attached["event"] == "attached"
+        key = f"websocket:{attached['chat_id']}"
+        assert sm._get_session_path(key).is_file()
+
+        listing = await _http_get(f"http://127.0.0.1:{port}/api/sessions", headers=auth)
+        assert listing.status_code == 200
+        rows = listing.json()["sessions"]
+        assert any(row["key"] == key for row in rows)
+        row = next(row for row in rows if row["key"] == key)
+        assert row["title"] == ""
+        assert row["preview"] == ""
+
+        delete_resp = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions/{quote(key, safe='')}/delete",
+            headers=auth,
+        )
+        assert delete_resp.status_code == 200
+        assert delete_resp.json()["deleted"] is True
+        assert not sm._get_session_path(key).exists()
+
+        listing_after_delete = await _http_get(
+            f"http://127.0.0.1:{port}/api/sessions", headers=auth
+        )
+        assert listing_after_delete.status_code == 200
+        assert key not in {row["key"] for row in listing_after_delete.json()["sessions"]}
     finally:
         await channel.stop()
         await server_task

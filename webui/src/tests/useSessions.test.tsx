@@ -187,6 +187,46 @@ describe("useSessions", () => {
     ]);
   });
 
+  it("replaces an optimistic new chat with the persisted session without duplicating it", async () => {
+    vi.mocked(api.listSessions)
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          key: "websocket:chat-persisted",
+          channel: "websocket",
+          chatId: "chat-persisted",
+          createdAt: "2026-05-23T10:00:00Z",
+          updatedAt: "2026-05-23T10:00:00Z",
+          title: "",
+          preview: "",
+        },
+      ]);
+    const client = fakeClient();
+    client.newChat.mockResolvedValue("chat-persisted");
+
+    const { result } = renderHook(() => useSessions(), {
+      wrapper: wrap(client),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await act(async () => {
+      await result.current.createChat();
+    });
+    expect(result.current.sessions.map((s) => s.key)).toEqual([
+      "websocket:chat-persisted",
+    ]);
+
+    act(() => {
+      client.emitSessionUpdate("chat-persisted");
+    });
+
+    await waitFor(() => expect(api.listSessions).toHaveBeenCalledTimes(2));
+    expect(result.current.sessions.map((s) => s.key)).toEqual([
+      "websocket:chat-persisted",
+    ]);
+  });
+
   it("adds the websocket ready default chat when the sessions endpoint omits it", async () => {
     vi.mocked(api.listSessions).mockResolvedValue([]);
     const client = fakeClient();

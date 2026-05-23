@@ -511,6 +511,14 @@ class WebSocketChannel(BaseChannel):
             return None
         return f"websocket:{configured}"
 
+    def _persist_new_webui_session(self, chat_id: str) -> None:
+        """Create the durable empty session row backing a new WebUI chat."""
+        if self._session_manager is None:
+            return
+        session = self._session_manager.get_or_create(f"websocket:{chat_id}")
+        session.metadata["webui"] = True
+        self._session_manager.save(session)
+
     def _attach(self, connection: Any, chat_id: str) -> None:
         """Idempotently subscribe *connection* to *chat_id*."""
         self._subs.setdefault(chat_id, set()).add(connection)
@@ -1480,6 +1488,7 @@ class WebSocketChannel(BaseChannel):
         t = envelope.get("type")
         if t == "new_chat":
             new_id = str(uuid.uuid4())
+            self._persist_new_webui_session(new_id)
             self._attach(connection, new_id)
             await self._send_event(connection, "attached", chat_id=new_id)
             await self._hydrate_after_subscribe(new_id)
