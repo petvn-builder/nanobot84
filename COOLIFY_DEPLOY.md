@@ -139,6 +139,30 @@ To roll back, use Coolify's deployment history and redeploy the previous working
 3. Remove `NANOBOT_9ROUTER_*` variables only after the old provider variables are restored.
 4. Restart the Nanobot container and test Telegram or `nanobot agent` again.
 
+## Google Calendar MCP
+
+The Coolify config enables a `google-calendar` MCP server through `npx @cocal/google-calendar-mcp`. It exposes read/search/availability tools plus event create and update; delete is intentionally not enabled.
+
+Before redeploying, create a Google Cloud OAuth client for a Desktop app, enable the Google Calendar API, and download the OAuth JSON file. Place it in the host export directory that is already mounted into the Nanobot container:
+
+```text
+/home/opc/coolify/exports/nanobot/google-calendar/gcp-oauth.keys.json
+```
+
+Inside the container, Nanobot reads that file at:
+
+```text
+/home/nanobot/exports/google-calendar/gcp-oauth.keys.json
+```
+
+The MCP server stores tokens under the same mounted export directory:
+
+```text
+/home/opc/coolify/exports/nanobot/google-calendar/tokens
+```
+
+After deployment, ask Nanobot to authenticate Google Calendar. Complete the browser OAuth flow once, then ask it to list, create, or update calendar events.
+
 ## Extending Later
 
 Future integrations can be added by editing `config.coolify.json` and adding matching Coolify environment variables. Good next steps are Gmail, Calendar, n8n webhooks, MCP servers with explicit `enabledTools`, file summary, and image generation. Enable one integration at a time and redeploy through Coolify after each change.
