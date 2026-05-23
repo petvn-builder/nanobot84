@@ -155,10 +155,10 @@ Inside the container, Nanobot reads that file at:
 /home/nanobot/exports/google-calendar/gcp-oauth.keys.json
 ```
 
-The MCP server stores tokens under the same mounted export directory:
+The MCP server stores tokens in the same mounted export directory:
 
 ```text
-/home/opc/coolify/exports/nanobot/google-calendar/tokens
+/home/opc/coolify/exports/nanobot/google-calendar/tokens.json
 ```
 
 After deployment, ask Nanobot to authenticate Google Calendar. Complete the browser OAuth flow once, then ask it to list, create, or update calendar events.

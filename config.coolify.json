@@ -65,7 +65,7 @@
         "args": ["-y", "@cocal/google-calendar-mcp"],
         "env": {
           "GOOGLE_OAUTH_CREDENTIALS": "/home/nanobot/exports/google-calendar/gcp-oauth.keys.json",
-          "GOOGLE_CALENDAR_MCP_TOKEN_PATH": "/home/nanobot/exports/google-calendar/tokens",
+          "GOOGLE_CALENDAR_MCP_TOKEN_PATH": "/home/nanobot/exports/google-calendar/tokens.json",
           "ENABLED_TOOLS": "list-calendars,list-events,search-events,get-event,get-freebusy,get-current-time,create-event,update-event"
         },
         "enabledTools": [
