@@ -13,6 +13,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install Python dependencies first (cached layer). Hatch reads the custom build
 # hook from hatch_build.py even for this metadata-only install.
@@ -29,6 +30,11 @@ COPY config.template.json config.template.json
 COPY config.coolify.json config.coolify.json
 COPY scripts/render_config.py scripts/render_config.py
 RUN uv pip install --system --no-cache .
+
+# Install Chromium and its native dependencies inside the container image so
+# sandboxed agents can use Playwright without reaching out to the host.
+RUN python -m playwright install --with-deps chromium && \
+    chmod -R a+rX /ms-playwright
 
 # Build the WhatsApp bridge
 WORKDIR /app/bridge
