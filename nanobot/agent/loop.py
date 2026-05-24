@@ -35,7 +35,7 @@ from nanobot.providers.factory import ProviderSnapshot
 from nanobot.session.goal_state import (
     runner_wall_llm_timeout_s,
 )
-from nanobot.session.manager import Session, SessionManager
+from nanobot.session.manager import Session, SessionManager, utc_now
 from nanobot.session.webui_turns import (
     WebuiTurnCoordinator,
     build_bus_progress_callback,
@@ -1424,8 +1424,6 @@ class AgentLoop:
         turn_latency_ms: int | None = None,
     ) -> None:
         """Save new-turn messages into session, truncating large tool results."""
-        from datetime import datetime
-
         last_assistant_idx: int | None = None
         for m in messages[skip:]:
             entry = dict(m)
@@ -1454,13 +1452,13 @@ class AgentLoop:
                     if not filtered:
                         continue
                     entry["content"] = filtered
-            entry.setdefault("timestamp", datetime.now().isoformat())
+            entry.setdefault("timestamp", utc_now().isoformat())
             session.messages.append(entry)
             if role == "assistant":
                 last_assistant_idx = len(session.messages) - 1
         if turn_latency_ms is not None and last_assistant_idx is not None:
             session.messages[last_assistant_idx]["latency_ms"] = int(turn_latency_ms)
-        session.updated_at = datetime.now()
+        session.updated_at = utc_now()
 
     def _persist_subagent_followup(self, session: Session, msg: InboundMessage) -> bool:
         """Persist subagent follow-ups before prompt assembly so history stays durable.
@@ -1515,8 +1513,6 @@ class AgentLoop:
 
     def _restore_runtime_checkpoint(self, session: Session) -> bool:
         """Materialize an unfinished turn into session history before a new request."""
-        from datetime import datetime
-
         checkpoint = session.metadata.get(self._RUNTIME_CHECKPOINT_KEY)
         if not isinstance(checkpoint, dict):
             return False
@@ -1528,12 +1524,12 @@ class AgentLoop:
         restored_messages: list[dict[str, Any]] = []
         if isinstance(assistant_message, dict):
             restored = dict(assistant_message)
-            restored.setdefault("timestamp", datetime.now().isoformat())
+            restored.setdefault("timestamp", utc_now().isoformat())
             restored_messages.append(restored)
         for message in completed_tool_results:
             if isinstance(message, dict):
                 restored = dict(message)
-                restored.setdefault("timestamp", datetime.now().isoformat())
+                restored.setdefault("timestamp", utc_now().isoformat())
                 restored_messages.append(restored)
         for tool_call in pending_tool_calls:
             if not isinstance(tool_call, dict):
@@ -1546,7 +1542,7 @@ class AgentLoop:
                     "tool_call_id": tool_id,
                     "name": name,
                     "content": "Error: Task interrupted before this tool finished.",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": utc_now().isoformat(),
                 }
             )
 
@@ -1569,8 +1565,6 @@ class AgentLoop:
 
     def _restore_pending_user_turn(self, session: Session) -> bool:
         """Close a turn that only persisted the user message before crashing."""
-        from datetime import datetime
-
         if not session.metadata.get(self._PENDING_USER_TURN_KEY):
             return False
 
@@ -1579,10 +1573,10 @@ class AgentLoop:
                 {
                     "role": "assistant",
                     "content": "Error: Task interrupted before a response was generated.",
-                    "timestamp": datetime.now().isoformat(),
+                    "timestamp": utc_now().isoformat(),
                 }
             )
-            session.updated_at = datetime.now()
+            session.updated_at = utc_now()
 
         self._clear_pending_user_turn(session)
         return True

@@ -37,6 +37,27 @@ describe("localized format helpers", () => {
     expect(english).not.toBe(chinese);
   });
 
+  it("treats server ISO timestamps without timezone as UTC", async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "Asia/Ho_Chi_Minh";
+    try {
+      await setAppLanguage("en");
+
+      expect(relativeTime("2026-04-18T11:59:00")).toBe(
+        new Intl.RelativeTimeFormat("en", { numeric: "auto" }).format(
+          -1,
+          "minute",
+        ),
+      );
+    } finally {
+      if (previousTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = previousTz;
+      }
+    }
+  });
+
   it("formats date-time using the active locale", async () => {
     const value = "2026-04-18T08:30:00Z";
     const date = new Date(value);

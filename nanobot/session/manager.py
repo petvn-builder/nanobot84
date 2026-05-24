@@ -6,7 +6,7 @@ import re
 import shutil
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +27,10 @@ _MESSAGE_TIME_PREFIX_RE = re.compile(r"^\[Message Time: [^\]]+\]\n?")
 _LOCAL_IMAGE_BREADCRUMB_RE = re.compile(r"^\[image: (?:/|~)[^\]]+\]\s*$")
 _TOOL_CALL_ECHO_RE = re.compile(r'^\s*(?:generate_image|message)\([^)]*\)\s*$')
 _SESSION_PREVIEW_MAX_CHARS = 120
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _sanitize_assistant_replay_text(content: str) -> str:
@@ -80,8 +84,8 @@ class Session:
 
     key: str  # channel:chat_id
     messages: list[dict[str, Any]] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
+    created_at: datetime = field(default_factory=utc_now)
+    updated_at: datetime = field(default_factory=utc_now)
     metadata: dict[str, Any] = field(default_factory=dict)
     last_consolidated: int = 0  # Number of messages already consolidated to files
 
@@ -109,11 +113,11 @@ class Session:
         msg = {
             "role": role,
             "content": content,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": utc_now().isoformat(),
             **kwargs
         }
         self.messages.append(msg)
-        self.updated_at = datetime.now()
+        self.updated_at = utc_now()
 
     def get_history(
         self,
@@ -213,7 +217,7 @@ class Session:
         """Clear all messages and reset session to initial state."""
         self.messages = []
         self.last_consolidated = 0
-        self.updated_at = datetime.now()
+        self.updated_at = utc_now()
         self.metadata.pop("_last_summary", None)
 
     def retain_recent_legal_suffix(self, max_messages: int) -> None:
@@ -256,7 +260,7 @@ class Session:
         dropped = len(self.messages) - len(retained)
         self.messages = retained
         self.last_consolidated = max(0, self.last_consolidated - dropped)
-        self.updated_at = datetime.now()
+        self.updated_at = utc_now()
 
     def enforce_file_cap(
         self,
@@ -376,8 +380,8 @@ class SessionManager:
             return Session(
                 key=key,
                 messages=messages,
-                created_at=created_at or datetime.now(),
-                updated_at=updated_at or datetime.now(),
+                created_at=created_at or utc_now(),
+                updated_at=updated_at or utc_now(),
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )
@@ -434,8 +438,8 @@ class SessionManager:
             return Session(
                 key=key,
                 messages=messages,
-                created_at=created_at or datetime.now(),
-                updated_at=updated_at or datetime.now(),
+                created_at=created_at or utc_now(),
+                updated_at=updated_at or utc_now(),
                 metadata=metadata,
                 last_consolidated=last_consolidated
             )

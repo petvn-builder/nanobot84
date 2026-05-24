@@ -33,11 +33,28 @@ export function deriveTitle(preview: string | undefined, fallback: string): stri
   return oneLine.length > 60 ? `${oneLine.slice(0, 57)}…` : oneLine;
 }
 
+function normalizeServerTimestamp(value: string): string {
+  const text = value.trim();
+  if (
+    /^\d{4}-\d{2}-\d{2}T/.test(text) &&
+    !/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text)
+  ) {
+    return `${text}Z`;
+  }
+  return text;
+}
+
 /** Loose ISO-or-epoch parser; returns ``null`` for missing/invalid input. */
-function parseDate(value: string | number | null | undefined): Date | null {
+export function parseDate(value: string | number | null | undefined): Date | null {
   if (value === null || value === undefined || value === "") return null;
-  const d = new Date(value);
+  const normalized = typeof value === "string" ? normalizeServerTimestamp(value) : value;
+  const d = new Date(normalized);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+export function timestampMs(value: string | number | null | undefined): number {
+  const date = parseDate(value);
+  return date ? date.getTime() : Number.NaN;
 }
 
 const RELATIVE_THRESHOLDS: [number, Intl.RelativeTimeFormatUnit][] = [

@@ -15,7 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { deriveTitle, relativeTime } from "@/lib/format";
+import { deriveTitle, relativeTime, timestampMs } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ChatSummary, SidebarDensity, SidebarSortMode } from "@/lib/types";
 
@@ -312,7 +312,7 @@ function groupSessions(
       normalSessions.push(session);
       continue;
     }
-    const timestamp = Date.parse(session.updatedAt ?? session.createdAt ?? "");
+    const timestamp = timestampMs(session.updatedAt ?? session.createdAt);
     const label = Number.isFinite(timestamp) && timestamp >= startOfToday
       ? labels.today
       : Number.isFinite(timestamp) && timestamp >= startOfYesterday
@@ -416,8 +416,8 @@ function sessionTime(
   session: ChatSummary,
   field: "createdAt" | "updatedAt",
 ): number {
-  const primary = Date.parse(session[field] ?? "");
+  const primary = timestampMs(session[field]);
   if (Number.isFinite(primary)) return primary;
-  const fallback = Date.parse(session.updatedAt ?? session.createdAt ?? "");
+  const fallback = timestampMs(session.updatedAt ?? session.createdAt);
   return Number.isFinite(fallback) ? fallback : 0;
 }
