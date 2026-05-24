@@ -14,7 +14,7 @@
       "model": "${NANOBOT_9ROUTER_MODEL}",
       "workspace": "/home/nanobot/.nanobot/workspace",
       "timezone": "Asia/Ho_Chi_Minh",
-      "unifiedSession": true,
+      "unifiedSession": false,
       "maxConcurrentSubagents": 1
     }
   },
@@ -28,7 +28,6 @@
       "enabled": true,
       "host": "0.0.0.0",
       "port": 8765,
-      "defaultChatId": "unified:default",
       "token": "${NANOBOT_WEB_TOKEN}",
       "websocketRequiresToken": true,
       "streaming": false,

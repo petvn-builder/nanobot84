@@ -1555,7 +1555,7 @@ async def test_multiplex_new_chat_roundtrip(bus: MagicMock) -> None:
 
 
 @pytest.mark.asyncio
-async def test_default_chat_id_routes_webui_to_configured_root(
+async def test_default_chat_id_keeps_webui_session_isolated(
     bus: MagicMock,
     tmp_path,
     monkeypatch,
@@ -1588,7 +1588,7 @@ async def test_default_chat_id_routes_webui_to_configured_root(
             await asyncio.sleep(0.1)
             inbound = bus.publish_inbound.call_args[0][0]
             assert inbound.chat_id == new_chat_id
-            assert inbound.session_key_override is None
+            assert inbound.session_key_override == f"websocket:{new_chat_id}"
             assert inbound.metadata["webui"] is True
     finally:
         await channel.stop()

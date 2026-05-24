@@ -497,10 +497,7 @@ class WebSocketChannel(BaseChannel):
         return str(uuid.uuid4())
 
     def _session_key_for_chat(self, chat_id: str) -> str | None:
-        configured = self.config.default_chat_id.strip()
-        if configured and chat_id == configured:
-            return configured
-        return None
+        return f"websocket:{chat_id}"
 
     def _default_webui_session_key(self) -> str | None:
         configured = self.config.default_chat_id.strip()
