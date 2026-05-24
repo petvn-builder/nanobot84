@@ -12,6 +12,10 @@ RUN apt-get update && \
     apt-get autoremove -y && \
     rm -rf /var/lib/apt/lists/*
 
+# Browser MCP server for agent-driven page inspection/navigation. This is
+# installed at build time so runtime MCP startup does not depend on npm network.
+RUN npm install -g @playwright/mcp@0.0.75
+
 WORKDIR /app
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 

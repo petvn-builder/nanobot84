@@ -79,6 +79,20 @@
           "manage-accounts"
         ],
         "toolTimeout": 120
+      },
+      "playwright": {
+        "command": "playwright-mcp",
+        "args": [
+          "--headless",
+          "--no-sandbox",
+          "--isolated",
+          "--executable-path=/ms-playwright/chromium-1223/chrome-linux/chrome",
+          "--viewport-size=1280x720"
+        ],
+        "env": {
+          "PLAYWRIGHT_BROWSERS_PATH": "/ms-playwright"
+        },
+        "toolTimeout": 120
       }
     }
   }
