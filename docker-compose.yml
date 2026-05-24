@@ -4,6 +4,7 @@ x-common-config: &common-config
     dockerfile: Dockerfile
   volumes:
     - ~/.nanobot:/home/nanobot/.nanobot
+    - /home/opc/docker/nanobot/workspace/projects/licham.blog:/home/nanobot/.nanobot/workspace/projects/licham.blog
   entrypoint:
     - /bin/sh
     - -c

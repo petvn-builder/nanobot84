@@ -21,6 +21,7 @@ services:
     volumes:
       - nanobot_data:/home/nanobot/.nanobot
       - /home/opc/coolify/exports/nanobot:/home/nanobot/exports
+      - /home/opc/docker/nanobot/workspace/projects/licham.blog:/home/nanobot/.nanobot/workspace/projects/licham.blog
     ports:
       - "8765:8765"
       - "18790:18790"
