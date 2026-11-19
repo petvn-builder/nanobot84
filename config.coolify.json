@@ -22,7 +22,8 @@
     "telegram": {
       "enabled": true,
       "token": "${TELEGRAM_TOKEN}",
-      "allowFrom": ["${TELEGRAM_ALLOW_FROM}"]
+      "allowFrom": ["${TELEGRAM_ALLOW_FROM}"],
+      "observeGroupMessages": true
     },
     "websocket": {
       "enabled": true,

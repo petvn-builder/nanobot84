@@ -26,9 +26,10 @@ from telegram.request import HTTPXRequest
 
 from nanobot.bus.events import OutboundMessage
 from nanobot.bus.queue import MessageBus
+from nanobot.channels._telegram_observe import GroupObservationStore
 from nanobot.channels.base import BaseChannel
 from nanobot.command.builtin import build_help_text
-from nanobot.config.paths import get_media_dir
+from nanobot.config.paths import get_media_dir, get_runtime_subdir
 from nanobot.config.schema import Base
 from nanobot.security.network import validate_url_target
 from nanobot.utils.helpers import split_message
@@ -235,6 +236,7 @@ class TelegramConfig(Base):
     reply_to_message: bool = False
     react_emoji: str = "ðŸ‘€"
     group_policy: Literal["open", "mention"] = "mention"
+    observe_group_messages: bool = False
     connection_pool_size: int = 32
     pool_timeout: float = 5.0
     streaming: bool = True
@@ -294,6 +296,39 @@ class TelegramChannel(BaseChannel):
         self._bot_user_id: int | None = None
         self._bot_username: str | None = None
         self._stream_bufs: dict[str, _StreamBuf] = {}  # chat_id -> streaming state
+        self._group_observation = (
+            GroupObservationStore(get_runtime_subdir("telegram-observed"))
+            if self.config.observe_group_messages else None
+        )
+
+    async def _group_observation_gate(self, update) -> bool:
+        """Observation grants context admission, never ownership or execution permission."""
+        message, user = update.message, update.effective_user
+        if not self._group_observation or message.chat.type not in ("group", "supergroup"):
+            return True
+        bot_id, bot_username = await self._ensure_bot_identity()
+        if user.id == bot_id:
+            return False
+        owner = str(user.id).isdigit() and str(user.id) in self.config.allow_from
+        if owner and not getattr(user, "is_bot", False) and self._explicit_group_mention(message, bot_id, bot_username):
+            return True
+        self._group_observation.record(message, user)
+        return False
+
+    @staticmethod
+    def _explicit_group_mention(message, bot_id, bot_username) -> bool:
+        for text_key, entities_key in (("text", "entities"), ("caption", "caption_entities")):
+            text = getattr(message, text_key, None) or ""
+            for entity in getattr(message, entities_key, None) or []:
+                if entity.type == "text_mention" and getattr(getattr(entity, "user", None), "id", None) == bot_id:
+                    return True
+                if entity.type not in ("mention", "bot_command") or not bot_username:
+                    continue
+                span = text.encode("utf-16-le")[entity.offset * 2:(entity.offset + entity.length) * 2].decode("utf-16-le")
+                target = span[span.find("@"):] if "@" in span else ""
+                if target.lower() == f"@{bot_username}".lower():
+                    return True
+        return False
 
     def is_allowed(self, sender_id: str) -> bool:
         """Preserve Telegram's legacy id|username allowlist matching."""
@@ -385,6 +420,11 @@ class TelegramChannel(BaseChannel):
                 self._on_message
             )
         )
+        if self.config.observe_group_messages:
+            self._app.add_handler(MessageHandler(
+                filters.ChatType.GROUPS & (filters.COMMAND | filters.CONTACT | filters.Dice.ALL | filters.Sticker.ALL),
+                self._on_message,
+            ))
 
         # Conditionally register inline keyboard callback handler
         if self.config.inline_keyboards:
@@ -573,431 +613,13 @@ class TelegramChannel(BaseChannel):
         """Call an async Telegram API function with retry on pool/network timeout and RetryAfter."""
         from telegram.error import RetryAfter
 
-        for attempt in range(1, _SEND_MAX_RETRIES + 1):
-            try:
-                return await fn(*args, **kwargs)
-            except TimedOut:
-                if attempt == _SEND_MAX_RETRIES:
-                    raise
-                delay = _SEND_RETRY_BASE_DELAY * (2 ** (attempt - 1))
-                self.logger.warning(
-                    "timeout (attempt {}/{}), retrying in {:.1f}s",
-                    attempt, _SEND_MAX_RETRIES, delay,
-                )
-                await asyncio.sleep(delay)
-            except RetryAfter as e:
-                if attempt == _SEND_MAX_RETRIES:
-                    raise
-                delay = float(e.retry_after)
-                self.logger.warning(
-                    "Flood Control (attempt {}/{}), retrying in {:.1f}s",
-                    attempt, _SEND_MAX_RETRIES, delay,
-                )
-                await asyncio.sleep(delay)
-
-    async def _send_text(
-        self,
-        chat_id: int,
-        text: str,
-        reply_params=None,
-        thread_kwargs: dict | None = None,
-        render_as_blockquote: bool = False,
-        reply_markup=None,
-    ) -> None:
-        """Send a plain text message with HTML fallback."""
-        try:
-            html = _tool_hint_to_telegram_blockquote(text) if render_as_blockquote else _markdown_to_telegram_html(text)
-            await self._call_with_retry(
-                self._app.bot.send_message,
-                chat_id=chat_id, text=html, parse_mode="HTML",
-                reply_parameters=reply_params,
-                reply_markup=reply_markup,
-                **(thread_kwargs or {}),
-            )
-        except BadRequest as e:
-            self.logger.warning("HTML parse failed, falling back to plain text: {}", e)
-            try:
-                await self._call_with_retry(
-                    self._app.bot.send_message,
-                    chat_id=chat_id,
-                    text=text,
-                    reply_parameters=reply_params,
-                    reply_markup=reply_markup,
-                    **(thread_kwargs or {}),
-                )
-            except Exception:
-                self.logger.exception("Error sending message")
-                raise
-
-    @staticmethod
-    def _is_not_modified_error(exc: Exception) -> bool:
-        return isinstance(exc, BadRequest) and "message is not modified" in str(exc).lower()
-
-    async def send_delta(self, chat_id: str, delta: str, metadata: dict[str, Any] | None = None) -> None:
-        """Progressive message editing: send on first delta, edit on subsequent ones."""
-        if not self._app:
-            return
-        meta = metadata or {}
-        int_chat_id = int(chat_id)
-        stream_id = meta.get("_stream_id")
-
-        if meta.get("_stream_end"):
-            buf = self._stream_bufs.get(chat_id)
-            if not buf or not buf.message_id or not buf.text:
-                return
-            if stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id:
-                return
-            self._stop_typing(chat_id)
-            if reply_to_message_id := meta.get("message_id"):
-                with suppress(ValueError):
-                    await self._remove_reaction(chat_id, int(reply_to_message_id))
-            thread_kwargs = {}
-            if message_thread_id := meta.get("message_thread_id"):
-                thread_kwargs["message_thread_id"] = message_thread_id
-            raw_text = buf.text
-            html = _markdown_to_telegram_html(raw_text)
-            if len(html) <= TELEGRAM_HTML_MAX_LEN:
-                primary_html = html
-                extra_html_chunks = []
-            else:
-                html_chunks = split_message(html, TELEGRAM_HTML_MAX_LEN)
-                primary_html = html_chunks[0]
-                extra_html_chunks = html_chunks[1:]
-            try:
-                await self._call_with_retry(
-                    self._app.bot.edit_message_text,
-                    chat_id=int_chat_id, message_id=buf.message_id,
-                    text=primary_html, parse_mode="HTML",
-                )
-            except BadRequest as e:
-                # Only fall back to plain text on actual HTML parse/format errors.
-                # Network errors (TimedOut, NetworkError) should propagate immediately
-                # to avoid doubling connection demand during pool exhaustion.
-                if self._is_not_modified_error(e):
-                    self.logger.debug("Final stream edit already applied for {}", chat_id)
-                    self._stream_bufs.pop(chat_id, None)
-                    return
-                self.logger.debug("Final stream edit failed (HTML), trying plain: {}", e)
-                # Fall back to raw markdown (not HTML) so users don't see raw tags.
-                primary_plain = split_message(raw_text, TELEGRAM_MAX_MESSAGE_LEN)[0] if len(raw_text) > TELEGRAM_MAX_MESSAGE_LEN else raw_text
-                try:
-                    await self._call_with_retry(
-                        self._app.bot.edit_message_text,
-                        chat_id=int_chat_id, message_id=buf.message_id,
-                        text=primary_plain,
-                    )
-                except Exception as e2:
-                    if self._is_not_modified_error(e2):
-                        self.logger.debug("Final stream plain edit already applied for {}", chat_id)
-                    else:
-                        self.logger.warning("Final stream edit failed: {}", e2)
-                        raise  # Let ChannelManager handle retry
-            for extra_html_chunk in extra_html_chunks:
-                try:
-                    await self._call_with_retry(
-                        self._app.bot.send_message,
-                        chat_id=int_chat_id, text=extra_html_chunk,
-                        parse_mode="HTML",
-                        **thread_kwargs,
-                    )
-                except Exception:
-                    # Fall back to _send_text which handles HTMLâ†’plain gracefully.
-                    await self._send_text(int_chat_id, extra_html_chunk)
-            self._stream_bufs.pop(chat_id, None)
-            return
-
-        buf = self._stream_bufs.get(chat_id)
-        if buf is None or (stream_id is not None and buf.stream_id is not None and buf.stream_id != stream_id):
-            buf = _StreamBuf(stream_id=stream_id)
-            self._stream_bufs[chat_id] = buf
-        elif buf.stream_id is None:
-            buf.stream_id = stream_id
-        buf.text += delta
-
-        if not buf.text.strip():
-            return
-
-        now = time.monotonic()
-        thread_kwargs = {}
-        if message_thread_id := meta.get("message_thread_id"):
-            thread_kwargs["message_thread_id"] = message_thread_id
-        if buf.message_id is None:
-            preview = _strip_md_block(buf.text)
-            try:
-                sent = await self._call_with_retry(
-                    self._app.bot.send_message,
-                    chat_id=int_chat_id, text=preview,
-                    **thread_kwargs,
-                )
-                buf.message_id = sent.message_id
-                buf.last_edit = now
-            except Exception as e:
-                self.logger.warning("Stream initial send failed: {}", e)
-                raise  # Let ChannelManager handle retry
-        elif (now - buf.last_edit) >= self.config.stream_edit_interval:
-            if len(buf.text) > TELEGRAM_MAX_MESSAGE_LEN:
-                await self._flush_stream_overflow(int_chat_id, buf, thread_kwargs)
-                buf.last_edit = now
-                return
-            preview = _strip_md_block(buf.text)
-            try:
-                await self._call_with_retry(
-                    self._app.bot.edit_message_text,
-                    chat_id=int_chat_id, message_id=buf.message_id,
-                    text=preview,
-                )
-                buf.last_edit = now
-            except Exception as e:
-                if self._is_not_modified_error(e):
-                    buf.last_edit = now
-                    return
-                self.logger.warning("Stream edit failed: {}", e)
-                raise  # Let ChannelManager handle retry
-
-    async def _flush_stream_overflow(
-        self,
-        chat_id: int,
-        buf: "_StreamBuf",
-        thread_kwargs: dict,
-    ) -> None:
-        """Split an oversized stream buffer mid-flight.
-
-        Edits the current stream message with the first chunk, sends any
-        intermediate chunks as standalone messages, then opens a new message
-        for the tail so subsequent deltas continue streaming into it.
-        """
-        chunks = split_message(buf.text, TELEGRAM_MAX_MESSAGE_LEN)
-        if len(chunks) <= 1:
-            return
-        try:
-            await self._call_with_retry(
-                self._app.bot.edit_message_text,
-                chat_id=chat_id, message_id=buf.message_id,
-                text=chunks[0],
-            )
-        except Exception as e:
-            if not self._is_not_modified_error(e):
-                self.logger.warning("Stream overflow edit failed: {}", e)
-                raise
-        for chunk in chunks[1:-1]:
-            await self._call_with_retry(
-                self._app.bot.send_message,
-                chat_id=chat_id, text=chunk, **thread_kwargs,
-            )
-        tail = chunks[-1]
-        sent = await self._call_with_retry(
-            self._app.bot.send_message,
-            chat_id=chat_id, text=tail, **thread_kwargs,
-        )
-        buf.message_id = sent.message_id
-        buf.text = tail
-
-    async def _on_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /start command."""
-        if not update.message or not update.effective_user:
-            return
-
-        user = update.effective_user
-        if not self.is_allowed(self._sender_id(user)):
-            return
-        await update.message.reply_text(
-            f"ðŸ‘‹ Hi {user.first_name}! I'm nanobot.\n\n"
-            "Send me a message and I'll respond!\n"
-            "Type /help to see available commands."
-        )
-
-    async def _on_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-        """Handle /help command for allowed users only."""
-        if not update.message or not update.effective_user:
-            return
-        if not self.is_allowed(self._sender_id(update.effective_user)):
-            return
-        await update.message.reply_text(build_help_text())
-
-    @staticmethod
-    def _sender_id(user) -> str:
-        """Build sender_id with username for allowlist matching."""
-        sid = str(user.id)
-        return f"{sid}|{user.username}" if user.username else sid
-
-    @staticmethod
-    def _derive_topic_session_key(message) -> str | None:
-        """Derive topic-scoped session key for Telegram chats with threads."""
-        message_thread_id = getattr(message, "message_thread_id", None)
-        if message_thread_id is None:
-            return None
-        return f"telegram:{message.chat_id}:topic:{message_thread_id}"
-
-    @staticmethod
-    def _build_message_metadata(message, user) -> dict:
-        """Build common Telegram inbound metadata payload."""
-        reply_to = getattr(message, "reply_to_message", None)
-        return {
-            "message_id": message.message_id,
-            "user_id": user.id,
-            "username": user.username,
-            "first_name": user.first_name,
-            "is_group": message.chat.type != "private",
-            "message_thread_id": getattr(message, "message_thread_id", None),
-            "is_forum": bool(getattr(message.chat, "is_forum", False)),
-            "reply_to_message_id": getattr(reply_to, "message_id", None) if reply_to else None,
-        }
-
-    async def _extract_reply_context(self, message) -> str | None:
-        """Extract text from the message being replied to, if any."""
-        reply = getattr(message, "reply_to_message", None)
-        if not reply:
-            return None
-        text = getattr(reply, "text", None) or getattr(reply, "caption", None) or ""
-        if len(text) > TELEGRAM_REPLY_CONTEXT_MAX_LEN:
-            text = text[:TELEGRAM_REPLY_CONTEXT_MAX_LEN] + "..."
-
-        if not text:
-            return None
-
-        bot_id, _ = await self._ensure_bot_identity()
-        reply_user = getattr(reply, "from_user", None)
-
-        if bot_id and reply_user and getattr(reply_user, "id", None) == bot_id:
-            return f"[Reply to bot: {text}]"
-        elif reply_user and getattr(reply_user, "username", None):
-            return f"[Reply to @{reply_user.username}: {text}]"
-        elif reply_user and getattr(reply_user, "first_name", None):
-            return f"[Reply to {reply_user.first_name}: {text}]"
-        else:
-            return f"[Reply to: {text}]"
-
-    async def _download_message_media(
-        self, msg, *, add_failure_content: bool = False
-    ) -> tuple[list[str], list[str]]:
-        """Download media from a message (current or reply). Returns (media_paths, content_parts)."""
-        media_file = None
-        media_type = None
-        if getattr(msg, "photo", None):
-            media_file = msg.photo[-1]
-            media_type = "image"
-        elif getattr(msg, "voice", None):
-            media_file = msg.voice
-            media_type = "voice"
-        elif getattr(msg, "audio", None):
-            media_file = msg.audio
-            media_type = "audio"
-        elif getattr(msg, "document", None):
-            media_file = msg.document
-            media_type = "file"
-        elif getattr(msg, "video", None):
-            media_file = msg.video
-            media_type = "video"
-        elif getattr(msg, "video_note", None):
-            media_file = msg.video_note
-            media_type = "video"
-        elif getattr(msg, "animation", None):
-            media_file = msg.animation
-            media_type = "animation"
-        if not media_file or not self._app:
-            return [], []
-        try:
-            file = await self._app.bot.get_file(media_file.file_id)
-            ext = self._get_extension(
-                media_type,
-                getattr(media_file, "mime_type", None),
-                getattr(media_file, "file_name", None),
-            )
-            media_dir = get_media_dir("telegram")
-            unique_id = getattr(media_file, "file_unique_id", media_file.file_id)
-            file_path = media_dir / f"{unique_id}{ext}"
-            await file.download_to_drive(str(file_path))
-            path_str = str(file_path)
-            if media_type in ("voice", "audio"):
-                transcription = await self.transcribe_audio(file_path)
-                if transcription:
-                    self.logger.info("Transcribed {}: {}...", media_type, transcription[:50])
-                    return [path_str], [f"[transcription: {transcription}]"]
-                return [path_str], [f"[{media_type}: {path_str}]"]
-            return [path_str], [f"[{media_type}: {path_str}]"]
-        except Exception as e:
-            self.logger.warning("Failed to download message media: {}", e)
-            if add_failure_content:
-                return [], [f"[{media_type}: download failed]"]
-            return [], []
-
-    async def _ensure_bot_identity(self) -> tuple[int | None, str | None]:
-        """Load bot identity once and reuse it for mention/reply checks."""
-        if self._bot_user_id is not None or self._bot_username is not None:
-            return self._bot_user_id, self._bot_username
-        if not self._app:
-            return None, None
-        bot_info = await self._app.bot.get_me()
-        self._bot_user_id = getattr(bot_info, "id", None)
-        self._bot_username = getattr(bot_info, "username", None)
-        return self._bot_user_id, self._bot_username
-
-    @staticmethod
-    def _has_mention_entity(
-        text: str,
-        entities,
-        bot_username: str,
-        bot_id: int | None,
-    ) -> bool:
-        """Check Telegram mention entities against the bot username."""
-        handle = f"@{bot_username}".lower()
-        for entity in entities or []:
-            entity_type = getattr(entity, "type", None)
-            if entity_type == "text_mention":
-                user = getattr(entity, "user", None)
-                if user is not None and bot_id is not None and getattr(user, "id", None) == bot_id:
-                    return True
-                continue
-            if entity_type != "mention":
-                continue
-            offset = getattr(entity, "offset", None)
-            length = getattr(entity, "length", None)
-            if offset is None or length is None:
-                continue
-            if text[offset : offset + length].lower() == handle:
-                return True
-        return handle in text.lower()
-
-    async def _is_group_message_for_bot(self, message) -> bool:
-        """Allow group messages when policy is open, @mentioned, or replying to the bot."""
-        if message.chat.type == "private" or self.config.group_policy == "open":
-            return True
-
-        bot_id, bot_username = await self._ensure_bot_identity()
-        if bot_username:
-            text = message.text or ""
-            caption = message.caption or ""
-            if self._has_mention_entity(
-                text,
-                getattr(message, "entities", None),
-                bot_username,
-                bot_id,
-            ):
-                return True
-            if self._has_mention_entity(
-                caption,
-                getattr(message, "caption_entities", None),
-                bot_username,
-                bot_id,
-            ):
-                return True
-
-        reply_user = getattr(getattr(message, "reply_to_message", None), "from_user", None)
-        return bool(bot_id and reply_user and reply_user.id == bot_id)
-
-    def _remember_thread_context(self, message) -> None:
-        """Cache Telegram thread context by chat/message id for follow-up replies."""
-        message_thread_id = getattr(message, "message_thread_id", None)
-        if message_thread_id is None:
-            return
-        key = (str(message.chat_id), message.message_id)
-        self._message_threads[key] = message_thread_id
-        if len(self._message_threads) > 1000:
-            self._message_threads.pop(next(iter(self._message_threads)))
+        for attempt in range(1, _SEND_z×N-¢G§²ÚîÆ­yÐ     self._message_threads.pop(next(iter(self._message_threads)))
 
     async def _forward_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Forward slash commands to the bus for unified handling in AgentLoop."""
         if not update.message or not update.effective_user:
+            return
+        if not await self._group_observation_gate(update):
             return
         message = update.message
         user = update.effective_user
@@ -1013,6 +635,9 @@ class TelegramChannel(BaseChannel):
             cmd_part = cmd_part.split("@")[0]
             content = f"{cmd_part} {rest[0]}" if rest else cmd_part
         content = self._normalize_telegram_command(content)
+        if (self._group_observation and message.chat.type in ("group", "supergroup")
+                and content.split(maxsplit=1)[0] == "/new"):
+            self._group_observation.clear(message)
 
         await self._handle_message(
             sender_id=sender_id,
@@ -1026,6 +651,8 @@ class TelegramChannel(BaseChannel):
     async def _on_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
+            return
+        if not await self._group_observation_gate(update):
             return
 
         message = update.message
@@ -1079,6 +706,8 @@ class TelegramChannel(BaseChannel):
             if tag:
                 content_parts.insert(0, tag)
         content = "\n".join(content_parts) if content_parts else "[empty message]"
+        if self._group_observation and message.chat.type in ("group", "supergroup"):
+            content = self._group_observation.context(message) + content
 
         self.logger.debug("message from {}: {}...", sender_id, content[:50])
 
@@ -1275,6 +904,9 @@ class TelegramChannel(BaseChannel):
         sender_id = self._sender_id(user)
         if not chat_id:
             self.logger.warning("Callback query without chat_id")
+            return
+        if (self._group_observation and query.message.chat.type in ("group", "supergroup")
+                and str(user.id) not in self.config.allow_from):
             return
         if not self.is_allowed(sender_id):
             return
